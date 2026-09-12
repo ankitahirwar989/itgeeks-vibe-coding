@@ -1,0 +1,66 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rulebook
+      POSTGRES_PASSWORD: rulebook
+      POSTGRES_DB: rulebook_qa
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rulebook -d rulebook_qa"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://rulebook:rulebook@db:5432/rulebook_qa
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-gemini-2.0-flash}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-004}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
+    profiles: ["tools"]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://rulebook:rulebook@db:5432/rulebook_qa
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      LLM_MODEL: ${LLM_MODEL:-gemini-2.0-flash}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-004}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
+      MAX_OUTPUT_TOKENS: ${MAX_OUTPUT_TOKENS:-1200}
+      CORS_ORIGINS: '["http://localhost:3000"]'
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+
+volumes:
+  db_data:
